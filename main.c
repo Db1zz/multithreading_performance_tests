@@ -9,22 +9,6 @@
 #include <stdbool.h>
 
 /*
-	With copying
-	Rendered for [m:0, s:46, ms:594]
-
-	With pointers
-	Rendered for [m:0, s:41, ms:456]
-
-====================================
-
-	Heavy struct with copying
-	Rendered for [m:8, s:58, ms:599]
-
-	Heavy struct with pointers
-	Rendered for [m:3, s:13, ms:201]
-*/
-
-/*
 	/ =================================================================================================================== /
 	/ =================================================================================================================== /
 	/ ================================================== THREADS TESTS ================================================== /
@@ -50,13 +34,18 @@ typedef struct s_mutexes
 	size_t threads_amount;
 }	t_mutexes;
 
-typedef struct s_thread_ctx
+typedef struct s_img
 {
 	unsigned int *arr;
-	t_mutexes *mutexes;
-	t_threads_sync *sync;
 	size_t height;
 	size_t width;
+}	t_img;
+
+typedef struct s_thread_ctx
+{
+	t_img *img;
+	t_mutexes *mutexes;
+	t_threads_sync *sync;
 	size_t tid;
 }	t_thread_ctx;
 
@@ -66,8 +55,25 @@ typedef	struct s_process_data
 	pthread_t *threads;
 	t_thread_ctx *ctxs;
 	t_threads_sync *sync;
+	t_img *img;
 	size_t threads_amount;
 }	t_process_data;
+
+t_img *init_img(size_t img_width, size_t img_height)
+{
+	t_img *img = malloc(sizeof(t_img));
+
+	img->arr = malloc(img_width * img_height * sizeof(unsigned int));
+	img->width = img_width;
+	img->height = img_height;
+	return img;
+}
+
+void destroy_img(t_img *img)
+{
+	free(img->arr);
+	free(img);
+}
 
 t_thread_ctx	*init_thread_ctxs(size_t img_width, size_t img_height, size_t threads_amount, t_mutexes *mutexes, t_threads_sync *sync)
 {
@@ -75,9 +81,8 @@ t_thread_ctx	*init_thread_ctxs(size_t img_width, size_t img_height, size_t threa
 	size_t perv_end = 0;
 
 	for (size_t i = 0; i < threads_amount; ++i) {
-		ctxs[i].height = (perv_end + (img_height / threads_amount + ((img_height - perv_end) % (threads_amount - i)))) - perv_end;
-		ctxs[i].width = img_width;
-		ctxs[i].arr = calloc(ctxs[i].height * ctxs[i].width, sizeof(unsigned int));
+		size_t ctx_height = (perv_end + (img_height / threads_amount + ((img_height - perv_end) % (threads_amount - i)))) - perv_end;
+		ctxs[i].img = init_img(img_width, ctx_height);
 		ctxs[i].tid = i;
 		ctxs[i].mutexes = mutexes;
 		ctxs[i].sync = sync;
@@ -118,10 +123,10 @@ unsigned int some_expensive_computation(size_t i, size_t j)
 
 void thread_compute(t_thread_ctx *ctx)
 {
-	for (size_t i = 0; i < ctx->height; ++i)
+	for (size_t i = 0; i < ctx->img->height; ++i)
 	{
-		for (size_t j = 0; j < ctx->width; ++j)
-			ctx->arr[i * j] = some_expensive_computation(i, j);
+		for (size_t j = 0; j < ctx->img->width; ++j)
+			ctx->img->arr[i * j] = some_expensive_computation(i, j);
 	}
 }
 
@@ -182,6 +187,7 @@ t_process_data *init_process(size_t img_width, size_t img_height, size_t threads
 	process_data->threads = create_threads(ctxs, threads_amount);
 	process_data->sync = sync;
 	process_data->threads_amount = threads_amount;
+	process_data->img = init_img(img_width, img_height);
 
 	return process_data;
 }
@@ -198,6 +204,26 @@ void wait_threads_to_finish(t_process_data *process_data)
 	for (size_t i = 0; i < process_data->threads_amount; ++i)
 	{
 		pthread_join(process_data->threads[i], NULL);
+	}
+}
+
+void copy_data_from_threads_to_array(t_process_data *process_data)
+{
+	size_t x = 0;
+	size_t y = 0;
+
+	for (size_t i = 0; i < process_data->threads_amount; ++i)
+	{
+		size_t x_end = process_data->ctxs[i].img->height;
+		size_t y_end = process_data->ctxs[i].img->width;
+		while (x < x_end)
+		{
+			while (y < y_end)
+			{
+				++y;
+			}
+			++x;
+		}
 	}
 }
 
@@ -220,6 +246,7 @@ void main_thread_routine(t_process_data *process_data, size_t amount_of_cycles)
 			pthread_mutex_unlock(&process_data->mutexes->global_mutex);
 			usleep(1000);
 		}
+		copy_data_from_threads_to_array(process_data);
 		printf("Cycle\n");
 	}
 	printf("Killing threads...\n");
@@ -237,13 +264,12 @@ int main(void)
 	const size_t img_height = 1080;
 	const size_t cpu_amount = sysconf(_SC_NPROCESSORS_CONF);
 	
-	unsigned int *img = calloc(img_width * img_height, sizeof(unsigned int));
-	struct timeval start_time = getTime();
-	
 	t_process_data *process_data = init_process(img_width, img_height, cpu_amount);
-	main_thread_routine(process_data, amount_of_cycles);
 
+	struct timeval start_time = getTime();
+	main_thread_routine(process_data, amount_of_cycles);
 	struct timeval end_time = getTime();
+
 	printf("Rendered for [m:%ld, s:%ld, ms:%ld]\n",
 		getMinutesDiff(&start_time, &end_time),
 		getSecondsDiff(&start_time, &end_time),
