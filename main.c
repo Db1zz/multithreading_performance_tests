@@ -229,11 +229,15 @@ void copy_data_from_threads_to_array(t_process_data *process_data)
 
 void main_thread_routine(t_process_data *process_data, size_t amount_of_cycles)
 {
+	struct timeval start_time;
+	struct timeval end_time;
+
 	for (size_t i = 0; i < amount_of_cycles; ++i)
 	{
 		pthread_mutex_lock(&process_data->mutexes->global_mutex);
 		process_data->ctxs->sync->threads_finished = 0;
 		pthread_mutex_unlock(&process_data->mutexes->global_mutex);
+		start_time = getTime();
 		unlock_all_mutexes(process_data->mutexes->threads_mutexes, process_data->mutexes->threads_amount);
 		while (true)
 		{
@@ -247,7 +251,11 @@ void main_thread_routine(t_process_data *process_data, size_t amount_of_cycles)
 			usleep(1000);
 		}
 		copy_data_from_threads_to_array(process_data);
-		printf("Cycle\n");
+		end_time = getTime();
+		printf("Rendered for [m:%ld, s:%ld, ms:%ld]\n",
+				getMinutesDiff(&start_time, &end_time),
+				getSecondsDiff(&start_time, &end_time),
+				getMilisecondsDiff(&start_time, &end_time));
 	}
 	printf("Killing threads...\n");
 	pthread_mutex_lock(&process_data->mutexes->global_mutex);
@@ -266,13 +274,7 @@ int main(void)
 	
 	t_process_data *process_data = init_process(img_width, img_height, cpu_amount);
 
-	struct timeval start_time = getTime();
 	main_thread_routine(process_data, amount_of_cycles);
-	struct timeval end_time = getTime();
 
-	printf("Rendered for [m:%ld, s:%ld, ms:%ld]\n",
-		getMinutesDiff(&start_time, &end_time),
-		getSecondsDiff(&start_time, &end_time),
-		getMilisecondsDiff(&start_time, &end_time)); 
 	return 0;
 }
